@@ -1,6 +1,6 @@
 # 🧹 Interactive System & Developer Cache Cleanup
 
-A full-featured **PowerShell cleanup utility** for Windows that safely purges junk, caches, and temporary files from both your **development environment** and your **system**, without touching personal data or breaking configurations.
+A full-featured cleanup utility for **Windows, Debian/Ubuntu, and Fedora/RHEL** that safely purges junk, caches, and temporary files from both your **development environment** and your **system**, without touching personal data or breaking configurations.
 
 ---
 
@@ -17,17 +17,21 @@ A full-featured **PowerShell cleanup utility** for Windows that safely purges ju
   
 ✅ **System cleanup:**
 - Windows Temp, Prefetch, and optional Search Index rebuild
+- Linux `/tmp`, `/var/tmp`, thumbnails, APT / DNF package cache, and systemd journals
   
 ✅ **Browser cleanup (optional):**
 - Chrome, Edge, Brave, Firefox, Tor, Mullvad, Comet, Incognition, and others  
 - Clears cache only (sessions and profiles remain intact)
   
-✅ **Readable, modular PowerShell code**  
+✅ **Readable, modular PowerShell / Bash code**  
 ✅ **No reinstalls, no registry edits, no unsafe operations**
 
 ---
 
 ## 🧰 Installation & Usage
+
+### Windows
+
 If your system blocks scripts:
 
 1. **Download or clone** this repo:
@@ -37,18 +41,38 @@ If your system blocks scripts:
 2. Run PowerShell as **Administrator**.
 3. Execute the script
    ```powershell
-    .\interactive_cleanup.ps1
-Follow on-screen prompts (type y or n for each section.
+    .\winclean-swissknife.ps1
+Follow on-screen prompts (type y or n for each section).
 
-What if cleans:
+### Linux (Debian / Ubuntu / Fedora / RHEL)
+
+1. **Download or clone** this repo:
+   ```bash
+   git clone https://github.com/LizzieNya/clear-dev-caches-win.git
+   cd clear-dev-caches-win
+   ```
+2. Run the appropriate script with Bash:
+   ```bash
+   # Debian / Ubuntu
+   bash debclean-swissknife.sh
+
+   # Fedora / RHEL
+   bash fedclean-swissknife.sh
+   ```
+3. Follow the on-screen prompts (type y or n for each section).
+
+> **Note:** On filesystems that do not support Unix execute permissions (e.g. NTFS), run the scripts with `bash` instead of `./script.sh`.
+
+What it cleans:
 
 | Category         | Description                                                                 |
 | ---------------- | --------------------------------------------------------------------------- |
 | **Dev caches**   | npm, pip, conda, Docker, Bun, Gradle, Flutter, VSCode, IntelliJ, etc.       |
-| **Python**       | Detects all python.exe installations and purges pip caches.                 |
+| **Python**       | Detects all python/python3 installations and purges pip caches.             |
 | **LM Studio**    | Removes models/logs but preserves history & settings.json.                  |
 | **Windows temp** | Clears `%TEMP%`, `%windir%\Temp`, and Prefetch safely.                      |
-| **Search index** | Deletes and optionally rebuilds Windows Search index.                       |
+| **Linux temp**   | Clears `/tmp`, `/var/tmp`, thumbnails, APT/DNF cache, and systemd journals. |
+| **Search index** | Windows Search, GNOME Tracker, or KDE Baloo index rebuild.                  |
 | **Browsers**     | Wipes cache, GPU cache, shader cache for Chromium & Firefox-based browsers. |
 
 ## ⚠️ Safety Notes
@@ -163,3 +187,56 @@ Summary:
 - Search index rebuilt
 - Browser caches cleared (sessions preserved)
 Approximate space freed: 24.6 GB
+
+  ## 🐧 Linux Example Output
+  ```
+=== INTERACTIVE CLEANUP ===
+
+Delete developer caches and build artifacts (npm, pip, conda, docker, gradle, flutter, etc.)? (y/n) y
+
+--- Deleting developer caches ---
+Deleting /home/user/.npm
+Deleting /home/user/.docker
+Deleting /home/user/.gradle
+Deleting /home/user/.flutter
+Deleting /home/user/.m2
+Deleting /home/user/.vs
+Cleaning LM Studio cache (keeping history & settings)
+Purging pip cache for /home/user/.local/bin/python3
+Purging pip cache for /home/user/miniconda3/bin/python
+npm cache cleared.
+conda clean --all -y
+Removed 6 cache(s).
+
+Removing node_modules folders
+Deleting /home/user/Desktop/project-alpha/node_modules
+Deleting /home/user/Desktop/webapp/node_modules
+Deleting /home/user/src/archive/node_modules
+
+--- Developer cleanup complete ---
+
+Clear system temp files, thumbnails, and APT package cache? (y/n) y
+--- Deleting system temp files ---
+Cleaning APT package cache...
+Vacuuming systemd journals...
+
+Rebuild search index (GNOME Tracker / KDE Baloo)? (y/n) y
+--- Rebuilding search index ---
+Resetting GNOME Tracker index...
+Purging KDE Baloo index...
+Turn search service back on after cleanup? (y/n) y
+Restarting Baloo...
+
+Clear browser caches (keep sessions/logins)? (y/n) y
+--- Cleaning browser caches ---
+
+Clearing cache: /home/user/.config/google-chrome/Default/Cache
+Clearing cache: /home/user/.config/BraveSoftware/Brave-Browser/Default/GPUCache
+Clearing cache: /home/user/.config/microsoft-edge/Default/Code Cache
+Clearing cache: /home/user/.mozilla/firefox/default-release/cache2
+Clearing cache: /home/user/.var/app/org.mozilla.firefox/data/firefox/profiles.default/cache2
+
+--- Browser cache cleanup complete ---
+
+Cleanup finished. Restart is recommended.
+```
