@@ -21,7 +21,6 @@ function New-BackupZip {
     if (-not (Test-Path $WorkDir)) { New-Item -ItemType Directory -Path $WorkDir | Out-Null }
     $timestamp = (Get-Date).ToString("yyyyMMdd-HHmmss")
     $zipPath   = Join-Path $WorkDir "cleanup-backup-$timestamp.zip"
-    # Filter to existing paths to avoid Compress-Archive errors
     $existing = $PathsToArchive | Where-Object { Test-Path $_ }
     if (-not $existing) { return $null }
     try {
@@ -37,17 +36,15 @@ function New-BackupZip {
 function Upload-Pixeldrain {
     param(
         [string] $FilePath,
-        [string] $ApiKey  # optional; if blank uploads anonymously
+        [string] $ApiKey
     )
     if (-not (Test-Path $FilePath)) { return $null }
-
     $uri     = "https://pixeldrain.com/api/file"
     $headers = @{}
     if ($ApiKey) {
         $token = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$ApiKey"))
         $headers["Authorization"] = "Basic $token"
     }
-
     try {
         $resp = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Form @{ file = Get-Item $FilePath }
         return $resp
@@ -73,35 +70,40 @@ function Save-BackupMetadata {
     $meta | ConvertTo-Json -Depth 6 | Set-Content -Path $metaPath -Encoding UTF8
 }
 
-# ---------------------- TARGET SETS ----------------------
-function Get-DevCacheTargets {
-    $targets = @(
-      "$env:USERPROFILE\.cache",
-      "$env:USERPROFILE\.npm",
-      "$env:USERPROFILE\npm-cache",
-      "$env:USERPROFILE\.bun",
-      "$env:USERPROFILE\.gradle",
-      "$env:USERPROFILE\.flutter",
-      "$env:USERPROFILE\.m2",
-      "$env:USERPROFILE\.matplotlib",
-      "$env:USERPROFILE\.idea",
-      "$env:USERPROFILE\.vs",
-      "$env:USERPROFILE\.vs-kubernetes",
-      "$env:USERPROFILE\.cursor",
-      "$env:USERPROFILE\.ollama",
-      "$env:USERPROFILE\.bito",
-      "$env:USERPROFILE\.llama",
-      "$env:USERPROFILE\.VirtualBox",
-      "$env:USERPROFILE\.docker"
+# ---------------------- PROPERTIES FILE READERS ----------------------
+function Read-PropertyPaths {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return @() }
+    Get-Content $Path | Where-Object { $_ -notmatch '^\s*#' -and $_.Trim() -ne '' }
+}
+
+function Resolve-PropPath {
+    param([string]$Relative, [string]$Base)
+    if ($Relative -match '^[A-Za-z]:\\' -or $Relative -match '^/') { return $Relative }
+    return Join-Path $Base $Relative
+}
+
+function Get-TargetsFromProps {
+    param(
+        [string]$PropsFile,
+        [string]$BaseDir
     )
+    $results = @()
+    foreach ($rel in (Read-PropertyPaths -Path $PropsFile)) {
+        $full = Resolve-PropPath -Relative $rel -Base $BaseDir
+        if (Test-Path $full) { $results += $full }
+    }
+    return $results
+}
 
-    # node_modules folders
-    $nodeModules = Get-ChildItem -Path "$env:USERPROFILE" -Directory -Recurse -Force -ErrorAction SilentlyContinue |
-      Where-Object { $_.Name -eq "node_modules" } |
-      Select-Object -ExpandProperty FullName
-    $targets += $nodeModules
+function Get-DevCacheTargets {
+    $props = Join-Path $PSScriptRoot "dev-caches-windows.properties"
+    return Get-TargetsFromProps -PropsFile $props -BaseDir $env:USERPROFILE
+}
 
-    return $targets
+function Get-AICacheTargets {
+    $props = Join-Path $PSScriptRoot "ai-caches-windows.properties"
+    return Get-TargetsFromProps -PropsFile $props -BaseDir $env:USERPROFILE
 }
 
 function Get-WindowsTempTargets {
@@ -146,6 +148,7 @@ function Get-BrowserCacheTargets {
 function Run-Cleanup {
     param(
         [bool]   $DoDevCaches,
+        [bool]   $DoAICaches,
         [bool]   $DoWindowsTemp,
         [bool]   $DoSearchIndex,
         [bool]   $RestartSearchService,
@@ -157,6 +160,7 @@ function Run-Cleanup {
     $allTargets = @()
 
     if ($DoDevCaches)    { $allTargets += Get-DevCacheTargets }
+    if ($DoAICaches)     { $allTargets += Get-AICacheTargets }
     if ($DoWindowsTemp)  { $allTargets += Get-WindowsTempTargets }
     if ($DoSearchIndex)  { $allTargets += Get-SearchIndexTargets }
     if ($DoBrowserCaches){ $allTargets += Get-BrowserCacheTargets }
@@ -178,7 +182,6 @@ function Run-Cleanup {
         }
     }
 
-    # --- Delete sections ---
     if ($DoDevCaches) {
         Write-Host "`n--- Deleting developer caches ---`n"
         foreach ($path in (Get-DevCacheTargets)) {
@@ -195,8 +198,6 @@ function Run-Cleanup {
             Write-Host "Purging pip cache for $py"
             & $py -m pip cache purge 2>$null
         }
-
-        # LM Studio partial cleanup
         $lmPath = "$env:USERPROFILE\.lmstudio"
         if (Test-Path $lmPath) {
             Write-Host "`nCleaning LM Studio cache (keeping history & settings)"
@@ -204,6 +205,16 @@ function Run-Cleanup {
                 if ($_.Name -notin @("history", "settings.json")) {
                     Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
                 }
+            }
+        }
+    }
+
+    if ($DoAICaches) {
+        Write-Host "`n--- Deleting AI agent caches ---`n"
+        foreach ($path in (Get-AICacheTargets)) {
+            if (Test-Path $path) {
+                Write-Host "Deleting $path"
+                Remove-Item $path -Recurse -Force -ErrorAction SilentlyContinue
             }
         }
     }
@@ -228,7 +239,6 @@ function Run-Cleanup {
 
     if ($DoBrowserCaches) {
         Write-Host "`n--- Cleaning browser caches ---`n"
-        # Chromium
         foreach ($base in @(
           "$env:LocalAppData\Google\Chrome*",
           "$env:LocalAppData\Microsoft\Edge*",
@@ -243,7 +253,6 @@ function Run-Cleanup {
                 Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
               }
         }
-        # Firefox family
         foreach ($p in @(
           "$env:AppData\Mozilla\Firefox\Profiles\*",
           "$env:LocalAppData\Mullvad Browser\Browser\TorBrowser\Data\Browser\profile.default",
@@ -263,7 +272,7 @@ function Run-Cleanup {
 # ---------------------- GUI ----------------------
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Windows Dev Cleaner"
-$form.Size = New-Object System.Drawing.Size(460,380)
+$form.Size = New-Object System.Drawing.Size(460,430)
 $form.StartPosition = "CenterScreen"
 
 $y = 20
@@ -277,7 +286,8 @@ function Add-Checkbox([string]$text,[int]$yPos,[bool]$default=$true) {
     return $cb
 }
 
-$cbDevCaches    = Add-Checkbox "Developer caches & build artifacts (npm/pip/conda/docker/gradle/flutter/etc.)" $y; $y+=25
+$cbDevCaches    = Add-Checkbox "Developer caches & build artifacts (npm/pip/docker/gradle/flutter/etc.)" $y; $y+=25
+$cbAICaches     = Add-Checkbox "AI agent caches (Kilo, Kiro, Devin, Windsurf, etc.)" $y; $y+=25
 $cbWindowsTemp  = Add-Checkbox "Windows temp files & Prefetch" $y; $y+=25
 $cbSearchIndex  = Add-Checkbox "Rebuild Windows Search index (stop + delete index)" $y; $y+=25
 $cbSearchRestart= Add-Checkbox "Turn Search service back on after cleanup" $y $true; $y+=25
@@ -313,13 +323,14 @@ $btnCancel.Add_Click({ $form.Close() })
 $btnRun.Add_Click({
     $form.Enabled = $false
     Run-Cleanup `
-        -DoDevCaches    $cbDevCaches.Checked `
-        -DoWindowsTemp  $cbWindowsTemp.Checked `
-        -DoSearchIndex  $cbSearchIndex.Checked `
+        -DoDevCaches     $cbDevCaches.Checked `
+        -DoAICaches      $cbAICaches.Checked `
+        -DoWindowsTemp   $cbWindowsTemp.Checked `
+        -DoSearchIndex   $cbSearchIndex.Checked `
         -RestartSearchService $cbSearchRestart.Checked `
         -DoBrowserCaches $cbBrowserCache.Checked `
-        -DoBackup       $cbBackup.Checked `
-        -PixeldrainKey  $txtKey.Text
+        -DoBackup        $cbBackup.Checked `
+        -PixeldrainKey   $txtKey.Text
     $form.Enabled = $true
 })
 
